@@ -971,6 +971,7 @@ function ProjectDetail({ project, volunteers, role, onBack, onUpdate, onStageFie
   const [newTask, setNewTask] = useState("");
   const [approvalNote, setApprovalNote] = useState(project.approval.note || "");
   const [reportDraft, setReportDraft] = useState(null);
+  const [editingTaskId, setEditingTaskId] = useState(null);
 
   const addTask = () => {
     if (!newTask.trim()) return;
@@ -984,6 +985,18 @@ function ProjectDetail({ project, volunteers, role, onBack, onUpdate, onStageFie
 
   const assignTask = (id, assignee) => {
     onUpdate({ tasks: project.tasks.map((t) => (t.id === id ? { ...t, assignee } : t)) });
+  };
+
+  const editTaskTitle = (id, title) => {
+    const clean = title.trim();
+    if (clean) {
+      onUpdate({ tasks: project.tasks.map((t) => (t.id === id ? { ...t, title: clean } : t)) });
+    }
+    setEditingTaskId(null);
+  };
+
+  const deleteTask = (id) => {
+    onUpdate({ tasks: project.tasks.filter((t) => t.id !== id) });
   };
 
   const nextStageBlocked = project.stage === 1 && project.approval.status !== "disetujui";
@@ -1072,13 +1085,28 @@ ${sd[3].catatanAkhir || "-"}`;
             {project.tasks.map((t) => (
               <div key={t.id} className="task-row">
                 <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id)} />
-                <span className={`task-title ${t.done ? "done" : ""}`}>{t.title}</span>
+                {editingTaskId === t.id ? (
+                  <input
+                    className="task-edit-input"
+                    autoFocus
+                    defaultValue={t.title}
+                    onBlur={(e) => editTaskTitle(t.id, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") editTaskTitle(t.id, e.target.value);
+                      if (e.key === "Escape") setEditingTaskId(null);
+                    }}
+                  />
+                ) : (
+                  <span className={`task-title ${t.done ? "done" : ""}`}>{t.title}</span>
+                )}
                 <select className="select-small" value={t.assignee} onChange={(e) => assignTask(t.id, e.target.value)}>
                   <option value="">Belum ditugaskan</option>
                   {volunteers.map((v) => (
                     <option key={v.id} value={v.name}>{v.name}</option>
                   ))}
                 </select>
+                <button className="icon-btn" title="Edit tugas" onClick={() => setEditingTaskId(t.id)}>✎</button>
+                <button className="icon-btn icon-btn-danger" title="Hapus tugas" onClick={() => deleteTask(t.id)}>🗑</button>
               </div>
             ))}
             <div className="add-task-row">
@@ -1451,6 +1479,7 @@ function Style() {
       .card-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; color: #7A2E0A; margin-bottom: 12px; }
 
       .task-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #F0ECE0; }
+      .task-edit-input { flex: 1; padding: 5px 8px; border: 1px solid #F2A65A; border-radius: 6px; font-size: 13.5px; font-family: 'Inter', sans-serif; }
       .task-title { flex: 1; font-size: 13.5px; }
       .task-title.done { text-decoration: line-through; color: #A6ABA8; }
       .select-small { font-size: 11.5px; border: 1px solid #E4DFD1; border-radius: 6px; padding: 4px 6px; font-family: 'Inter', sans-serif; color: #6B4A38; background: #FAF8F1; }
@@ -1503,6 +1532,35 @@ function Style() {
       .modal h2 { font-family: 'Fraunces', serif; font-size: 19px; margin: 0 0 16px; color: #7A2E0A; }
       .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
       .code-error { color: #C33A28; font-size: 12.5px; margin: -6px 0 4px; font-weight: 600; }
+
+      @media (max-width: 900px) {
+        .app-shell { flex-direction: column; min-height: auto; }
+        .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 14px 16px; gap: 10px 16px; }
+        .brand-sub { display: none; }
+        .nav { flex-direction: row; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .nav-item { white-space: nowrap; }
+        .sync-warning { order: 3; width: 100%; }
+        .role-switch { margin-top: 0; max-width: 200px; }
+        .main { padding: 20px 16px; }
+        .page-head { flex-wrap: wrap; gap: 12px; }
+        .project-grid { grid-template-columns: 1fr; }
+        .action-grid { grid-template-columns: 1fr; }
+        .stat-grid { grid-template-columns: repeat(2, 1fr); }
+        .detail-grid { grid-template-columns: 1fr; }
+        .field-row { flex-direction: column; gap: 0; }
+        .modal { width: 92vw; padding: 20px; max-height: 88vh; }
+        .table-wrap { overflow-x: auto; }
+        .table { min-width: 620px; }
+      }
+
+      @media (max-width: 480px) {
+        h1 { font-size: 22px; }
+        .stat-grid { grid-template-columns: 1fr 1fr; }
+        .node-label { font-size: 8.5px; width: 54px; }
+        .task-row { flex-wrap: wrap; }
+        .select-small { flex: 1; }
+        .card-actions { flex-wrap: wrap; }
+      }
     `}</style>
   );
 }
