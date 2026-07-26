@@ -6,5 +6,5 @@ import react from "@vitejs/plugin-react";
 // Vercel/Netlify, biarkan "/".
 export default defineConfig({
   plugins: [react()],
-  base: "/",
+  base: "/rz-manajemen-program/",
 });
