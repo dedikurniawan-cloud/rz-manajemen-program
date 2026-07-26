@@ -423,7 +423,7 @@ function App() {
           <div className="sync-warning">Gagal menyimpan ke Google Sheets. Periksa koneksi.</div>
         )}
         <div className="role-switch">
-          <div className="role-label">Peran (demo)</div>
+          <div className="role-label">Peran</div>
           <div className="role-toggle">
             {["Staf", "Manajer"].map((r) => (
               <button key={r} className={`role-btn ${role === r ? "active" : ""}`} onClick={() => requestRoleSwitch(r)}>
