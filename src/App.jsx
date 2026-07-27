@@ -413,6 +413,7 @@ function App() {
             ["dashboard", "Dashboard"],
             ["program", "Program"],
             ["relawan", "Relawan"],
+            ["laporan", "Laporan"],
           ].map(([key, label]) => (
             <button key={key} className={`nav-item ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}>
               {label}
@@ -445,7 +446,7 @@ function App() {
             projectsCount={filteredProjects.length}
             period={period}
             setPeriod={setPeriod}
-            activityLog={data.activityLog}
+            projects={filteredProjects}
             openProject={(p) => {
               setTab("program");
               setOpenProject(p.id);
@@ -482,6 +483,8 @@ function App() {
             deleteVolunteer={deleteVolunteer}
           />
         )}
+
+        {tab === "laporan" && <LaporanTab projects={data.projects} />}
       </main>
 
       {showManagerCode && (
@@ -495,8 +498,7 @@ function App() {
   );
 }
 
-function Dashboard({ pendingApprovals, overdue, totalBeneficiaries, totalBudget, activeVolunteers, projectsCount, period, setPeriod, activityLog, openProject }) {
-  const recentActivity = (activityLog || []).slice(0, 8);
+function Dashboard({ pendingApprovals, overdue, totalBeneficiaries, totalBudget, activeVolunteers, projectsCount, period, setPeriod, projects, openProject }) {
   return (
     <div className="page">
       <div className="page-head">
@@ -559,18 +561,42 @@ function Dashboard({ pendingApprovals, overdue, totalBeneficiaries, totalBudget,
         </div>
       </div>
 
-      <div className="section-label">Riwayat Aktivitas Terbaru</div>
-      <div className="card">
-        {recentActivity.length === 0 && <div className="muted">Belum ada aktivitas edit/hapus yang tercatat.</div>}
-        {recentActivity.map((entry) => (
-          <div key={entry.id} className="activity-row">
-            <div>
-              <strong>{entry.role}</strong> {entry.action.toLowerCase()} {entry.entityType.toLowerCase()}
-              {entry.entityName ? <>: <strong>{entry.entityName}</strong></> : null}
-            </div>
-            <span className="muted-inline">{fmtDateTime(entry.timestamp)}</span>
-          </div>
-        ))}
+      <div className="section-label">Rekapitulasi Progress Program</div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Program</th>
+              <th>Tahap</th>
+              <th>Progres Tugas</th>
+              <th>Target PM</th>
+              <th>Realisasi PM</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {projects.map((p) => (
+              <tr key={p.id} className="table-row" onClick={() => openProject(p)}>
+                <td>{p.name}</td>
+                <td>{STAGES[p.stage]}</td>
+                <td>
+                  <div className="progress-row" style={{ marginTop: 0 }}>
+                    <div className="progress-track">
+                      <div className="progress-fill" style={{ width: `${taskProgress(p.tasks)}%` }} />
+                    </div>
+                    <span className="progress-pct">{taskProgress(p.tasks)}%</span>
+                  </div>
+                </td>
+                <td>{p.stageData[0].targetPM || "-"}</td>
+                <td>{p.stageData[2].realisasiPM || "-"}</td>
+                <td>{isOverdue(p) ? <Badge tone="danger">Terlambat</Badge> : <ApprovalBadge status={p.approval.status} />}</td>
+              </tr>
+            ))}
+            {projects.length === 0 && (
+              <tr><td colSpan={6} className="muted">Belum ada program pada periode ini.</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1352,6 +1378,257 @@ function NewVolunteerModal({ onClose, onSave }) {
   );
 }
 
+function LaporanTab({ projects }) {
+  const [reportType, setReportType] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [periodMonth, setPeriodMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [photo1, setPhoto1] = useState(null);
+  const [photo2, setPhoto2] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+
+  const readPhoto = (file, setter) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setter(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const monthLabel = (() => {
+    const [y, m] = periodMonth.split("-").map(Number);
+    if (!y || !m) return "-";
+    const dt = new Date(y, m - 1, 1);
+    return dt.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+  })();
+
+  const selectedProject = projects.find((p) => p.id === selectedProjectId);
+
+  const monthProjects = projects.filter((p) => {
+    const [y, m] = periodMonth.split("-").map(Number);
+    if (!y || !m || !p.startDate) return true;
+    const start = new Date(p.startDate + "T00:00:00");
+    return start.getFullYear() < y || (start.getFullYear() === y && start.getMonth() + 1 <= m);
+  });
+
+  if (showPreview) {
+    return (
+      <div className="page">
+        <button className="back-link no-print" onClick={() => setShowPreview(false)}>← Kembali ke Pengaturan Laporan</button>
+        <button className="btn-primary no-print" style={{ marginBottom: 20 }} onClick={() => window.print()}>Unduh sebagai PDF</button>
+        <div className="muted no-print" style={{ marginBottom: 16 }}>
+          Klik tombol di atas, lalu pada jendela cetak yang muncul, pilih tujuan cetak <strong>"Save as PDF"</strong> / <strong>"Simpan sebagai PDF"</strong>.
+        </div>
+
+        <div className="print-area">
+          {reportType === "program" ? (
+            <ProgramMonthlyReport project={selectedProject} monthLabel={monthLabel} photo1={photo1} photo2={photo2} />
+          ) : (
+            <RealizationReport projects={monthProjects} monthLabel={monthLabel} photo1={photo1} photo2={photo2} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">Laporan</div>
+          <h1>Buat Laporan</h1>
+        </div>
+      </div>
+
+      <div className="report-type-grid">
+        <button className={`report-type-card ${reportType === "program" ? "active" : ""}`} onClick={() => setReportType("program")}>
+          <div className="card-title">Laporan Bulanan per Program</div>
+          <div className="muted">Detail satu program: perencanaan, target vs realisasi, dampak, kendala, dan dokumentasi.</div>
+        </button>
+        <button className={`report-type-card ${reportType === "realisasi" ? "active" : ""}`} onClick={() => setReportType("realisasi")}>
+          <div className="card-title">Laporan Realisasi Seluruh Program</div>
+          <div className="muted">Ringkasan seluruh program: total penerima manfaat, dana tersalurkan, dan status tiap program.</div>
+        </button>
+      </div>
+
+      {reportType && (
+        <div className="card" style={{ marginTop: 20 }}>
+          <div className="card-title">Pengaturan Laporan</div>
+
+          <label className="field">
+            <span>Periode Bulan</span>
+            <input type="month" value={periodMonth} onChange={(e) => setPeriodMonth(e.target.value)} />
+          </label>
+
+          {reportType === "program" && (
+            <label className="field">
+              <span>Pilih Program</span>
+              <select className="select" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
+                <option value="">— Pilih Program —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <div className="field-row">
+            <label className="field">
+              <span>Dokumentasi Foto 1</span>
+              <input type="file" accept="image/*" onChange={(e) => readPhoto(e.target.files[0], setPhoto1)} />
+            </label>
+            <label className="field">
+              <span>Dokumentasi Foto 2</span>
+              <input type="file" accept="image/*" onChange={(e) => readPhoto(e.target.files[0], setPhoto2)} />
+            </label>
+          </div>
+
+          <div className="muted" style={{ marginBottom: 14 }}>
+            Catatan: sistem ini menyimpan data sebagai status terkini, bukan riwayat per bulan — jadi laporan menampilkan kondisi program saat ini dengan label periode yang dipilih. Foto tidak tersimpan permanen di database; perlu diunggah ulang setiap kali membuat laporan.
+          </div>
+
+          <button
+            className="btn-primary"
+            disabled={reportType === "program" && !selectedProjectId}
+            onClick={() => setShowPreview(true)}
+          >
+            Lihat & Buat Laporan
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportHeader({ title, subtitle, monthLabel }) {
+  return (
+    <div className="report-header">
+      <div className="report-org">Rumah Zakat — Sumatera Selatan</div>
+      <h1 className="report-title">{title}</h1>
+      {subtitle && <div className="report-subtitle">{subtitle}</div>}
+      <div className="report-period">Periode: {monthLabel}</div>
+    </div>
+  );
+}
+
+function ProgramMonthlyReport({ project, monthLabel, photo1, photo2 }) {
+  if (!project) return <div className="muted">Program belum dipilih.</div>;
+  const sd = project.stageData;
+  const doneT = project.tasks.filter((t) => t.done).length;
+
+  return (
+    <div className="report-doc">
+      <ReportHeader title="Laporan Bulanan Program" subtitle={project.name} monthLabel={monthLabel} />
+
+      <table className="report-table">
+        <tbody>
+          <tr><td>Kategori</td><td>{sd[0].kategori || "-"}</td></tr>
+          <tr><td>Lokasi</td><td>{project.location}{sd[0].lokasiDetail ? ` (${sd[0].lokasiDetail})` : ""}</td></tr>
+          <tr><td>PIC</td><td>{project.pic}</td></tr>
+          <tr><td>Periode Program</td><td>{fmtDate(project.startDate)} – {fmtDate(project.targetDate)}</td></tr>
+          <tr><td>Tahap Saat Ini</td><td>{STAGES[project.stage]}</td></tr>
+          <tr><td>Sumber Pendanaan</td><td>{sd[0].sumberDana || "-"}</td></tr>
+        </tbody>
+      </table>
+
+      <div className="report-section-title">Perencanaan</div>
+      <p>{sd[0].latarBelakang || "-"}</p>
+      <p><strong>Tujuan:</strong> {sd[0].tujuanProgram || "-"}</p>
+
+      <div className="report-section-title">Target vs Realisasi</div>
+      <table className="report-table">
+        <thead><tr><th></th><th>Target</th><th>Realisasi</th></tr></thead>
+        <tbody>
+          <tr><td>Penerima Manfaat</td><td>{sd[0].targetPM || "-"}</td><td>{sd[2].realisasiPM || "-"}</td></tr>
+          <tr><td>Output / Keluaran</td><td>{sd[0].targetOutput || "-"}</td><td>{sd[2].realisasiOutput || "-"}</td></tr>
+          <tr><td>Anggaran</td><td>Rp {numOf(sd[0].estimasiAnggaran).toLocaleString("id-ID")}</td><td>Rp {numOf(sd[2].danaTerpakai).toLocaleString("id-ID")}</td></tr>
+        </tbody>
+      </table>
+
+      <div className="report-section-title">Progres Tugas</div>
+      <p>{doneT} dari {project.tasks.length} tugas selesai ({taskProgress(project.tasks)}%)</p>
+
+      <div className="report-section-title">Dampak</div>
+      <p><strong>Diharapkan:</strong> {sd[0].dampakDiharapkan || "-"}</p>
+      <p><strong>Tercapai:</strong> {sd[3].dampakTercapai || "-"}</p>
+
+      <div className="report-section-title">Kendala & Solusi</div>
+      <p><strong>Kendala:</strong> {sd[2].kendala || "-"}</p>
+      <p><strong>Solusi:</strong> {sd[2].solusiKendala || "-"}</p>
+
+      {sd[3].testimoni && (
+        <>
+          <div className="report-section-title">Testimoni Penerima Manfaat</div>
+          <p>{sd[3].testimoni}</p>
+        </>
+      )}
+
+      {sd[3].rekomendasi && (
+        <>
+          <div className="report-section-title">Rekomendasi Tindak Lanjut</div>
+          <p>{sd[3].rekomendasi}</p>
+        </>
+      )}
+
+      <div className="report-section-title">Dokumentasi</div>
+      <div className="report-photos">
+        {photo1 && <img src={photo1} className="report-photo" alt="Dokumentasi 1" />}
+        {photo2 && <img src={photo2} className="report-photo" alt="Dokumentasi 2" />}
+        {!photo1 && !photo2 && <p className="muted">Belum ada foto diunggah.</p>}
+      </div>
+    </div>
+  );
+}
+
+function RealizationReport({ projects, monthLabel, photo1, photo2 }) {
+  const totalPM = projects.reduce((s, p) => s + getPM(p), 0);
+  const totalBudget = projects.reduce((s, p) => s + getBudget(p), 0);
+
+  return (
+    <div className="report-doc">
+      <ReportHeader title="Laporan Realisasi Seluruh Program" monthLabel={monthLabel} />
+
+      <table className="report-table">
+        <tbody>
+          <tr><td>Jumlah Program</td><td>{projects.length}</td></tr>
+          <tr><td>Total Penerima Manfaat</td><td>{totalPM}</td></tr>
+          <tr><td>Total Dana Tersalurkan</td><td>Rp {totalBudget.toLocaleString("id-ID")}</td></tr>
+        </tbody>
+      </table>
+
+      <div className="report-section-title">Detail per Program</div>
+      <table className="report-table">
+        <thead>
+          <tr><th>Program</th><th>Tahap</th><th>Target PM</th><th>Realisasi PM</th><th>Anggaran</th><th>Terpakai</th></tr>
+        </thead>
+        <tbody>
+          {projects.map((p) => (
+            <tr key={p.id}>
+              <td>{p.name}</td>
+              <td>{STAGES[p.stage]}</td>
+              <td>{p.stageData[0].targetPM || "-"}</td>
+              <td>{p.stageData[2].realisasiPM || "-"}</td>
+              <td>Rp {numOf(p.stageData[0].estimasiAnggaran).toLocaleString("id-ID")}</td>
+              <td>Rp {numOf(p.stageData[2].danaTerpakai).toLocaleString("id-ID")}</td>
+            </tr>
+          ))}
+          {projects.length === 0 && (
+            <tr><td colSpan={6} className="muted">Tidak ada program pada periode ini.</td></tr>
+          )}
+        </tbody>
+      </table>
+
+      <div className="report-section-title">Dokumentasi</div>
+      <div className="report-photos">
+        {photo1 && <img src={photo1} className="report-photo" alt="Dokumentasi 1" />}
+        {photo2 && <img src={photo2} className="report-photo" alt="Dokumentasi 2" />}
+        {!photo1 && !photo2 && <p className="muted">Belum ada foto diunggah.</p>}
+      </div>
+    </div>
+  );
+}
+
 function Style() {
   return (
     <style>{`
@@ -1560,6 +1837,32 @@ function Style() {
         .task-row { flex-wrap: wrap; }
         .select-small { flex: 1; }
         .card-actions { flex-wrap: wrap; }
+      }
+
+      .report-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .report-type-card { text-align: left; background: #fff; border: 1px solid #E4DFD1; border-radius: 14px; padding: 18px; cursor: pointer; font-family: 'Inter', sans-serif; }
+      .report-type-card:hover { border-color: #F2A65A; }
+      .report-type-card.active { border-color: #E8631A; box-shadow: 0 0 0 2px rgba(232,99,26,0.25) inset; }
+      .report-doc { background: #fff; border: 1px solid #E4DFD1; border-radius: 14px; padding: 32px; max-width: 760px; }
+      .report-header { border-bottom: 2px solid #E8631A; padding-bottom: 14px; margin-bottom: 20px; }
+      .report-org { font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #E8631A; }
+      .report-title { font-family: 'Fraunces', serif; font-size: 24px; color: #7A2E0A; margin: 4px 0 2px; }
+      .report-subtitle { font-size: 15px; color: #6B4A38; font-weight: 600; }
+      .report-period { font-size: 12.5px; color: #7A6A60; margin-top: 4px; }
+      .report-section-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 14.5px; color: #7A2E0A; margin: 20px 0 8px; }
+      .report-doc p { font-size: 13.5px; line-height: 1.6; margin: 0 0 8px; }
+      .report-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+      .report-table td, .report-table th { padding: 6px 10px; font-size: 13px; border-bottom: 1px solid #F0ECE0; text-align: left; }
+      .report-table td:first-child { color: #6B4A38; }
+      .report-photos { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+      .report-photo { width: 260px; max-width: 100%; border-radius: 8px; border: 1px solid #E4DFD1; }
+
+      @media print {
+        body * { visibility: hidden; }
+        .print-area, .print-area * { visibility: visible; }
+        .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+        .no-print { display: none !important; }
+        .report-doc { border: none; padding: 0; max-width: 100%; }
       }
     `}</style>
   );
