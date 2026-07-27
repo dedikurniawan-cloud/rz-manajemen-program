@@ -189,8 +189,8 @@ const taskProgress = (tasks) => {
   return Math.round((tasks.filter((t) => t.done).length / tasks.length) * 100);
 };
 
-const getPM = (p) => numOf(p.stageData?.[2]?.realisasiPM) || numOf(p.stageData?.[0]?.targetPM);
-const getBudget = (p) => numOf(p.stageData?.[2]?.danaTerpakai) || numOf(p.stageData?.[1]?.danaTerkumpul) || numOf(p.stageData?.[0]?.estimasiAnggaran);
+const getPM = (p) => numOf(p.stageData?.[2]?.realisasiPM);
+const getBudget = (p) => numOf(p.stageData?.[2]?.danaTerpakai);
 
 function Stepper({ stage }) {
   return (
