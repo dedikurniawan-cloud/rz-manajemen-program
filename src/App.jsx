@@ -572,6 +572,7 @@ function Dashboard({ pendingApprovals, overdue, totalBeneficiaries, totalBudget,
               <th>Target PM</th>
               <th>Realisasi PM</th>
               <th>Status</th>
+              <th>Dokumentasi</th>
             </tr>
           </thead>
           <tbody>
@@ -590,10 +591,25 @@ function Dashboard({ pendingApprovals, overdue, totalBeneficiaries, totalBudget,
                 <td>{p.stageData[0].targetPM || "-"}</td>
                 <td>{p.stageData[2].realisasiPM || "-"}</td>
                 <td>{isOverdue(p) ? <Badge tone="danger">Terlambat</Badge> : <ApprovalBadge status={p.approval.status} />}</td>
+                <td>
+                  {p.stageData[2].dokumentasi ? (
+                    <a
+                      className="doc-btn"
+                      href={/^https?:\/\//i.test(p.stageData[2].dokumentasi) ? p.stageData[2].dokumentasi : `https://${p.stageData[2].dokumentasi}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      📁 Dokumentasi
+                    </a>
+                  ) : (
+                    <span className="muted-inline">-</span>
+                  )}
+                </td>
               </tr>
             ))}
             {projects.length === 0 && (
-              <tr><td colSpan={6} className="muted">Belum ada program pada periode ini.</td></tr>
+              <tr><td colSpan={7} className="muted">Belum ada program pada periode ini.</td></tr>
             )}
           </tbody>
         </table>
@@ -1387,6 +1403,7 @@ function LaporanTab({ projects }) {
   });
   const [photo1, setPhoto1] = useState(null);
   const [photo2, setPhoto2] = useState(null);
+  const [donorName, setDonorName] = useState("");
   const [showPreview, setShowPreview] = useState(false);
 
   const readPhoto = (file, setter) => {
@@ -1424,6 +1441,8 @@ function LaporanTab({ projects }) {
         <div className="print-area">
           {reportType === "program" ? (
             <ProgramMonthlyReport project={selectedProject} monthLabel={monthLabel} photo1={photo1} photo2={photo2} />
+          ) : reportType === "donatur" ? (
+            <DonorProgressReport project={selectedProject} donorName={donorName} monthLabel={monthLabel} photo1={photo1} photo2={photo2} />
           ) : (
             <RealizationReport projects={monthProjects} monthLabel={monthLabel} photo1={photo1} photo2={photo2} />
           )}
@@ -1450,6 +1469,10 @@ function LaporanTab({ projects }) {
           <div className="card-title">Laporan Realisasi Seluruh Program</div>
           <div className="muted">Ringkasan seluruh program: total penerima manfaat, dana tersalurkan, dan status tiap program.</div>
         </button>
+        <button className={`report-type-card ${reportType === "donatur" ? "active" : ""}`} onClick={() => setReportType("donatur")}>
+          <div className="card-title">Laporan Progress untuk Donatur</div>
+          <div className="muted">Surat naratif untuk donatur: perkembangan program, dampak, dan ucapan terima kasih — tanpa rincian internal.</div>
+        </button>
       </div>
 
       {reportType && (
@@ -1461,7 +1484,7 @@ function LaporanTab({ projects }) {
             <input type="month" value={periodMonth} onChange={(e) => setPeriodMonth(e.target.value)} />
           </label>
 
-          {reportType === "program" && (
+          {(reportType === "program" || reportType === "donatur") && (
             <label className="field">
               <span>Pilih Program</span>
               <select className="select" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
@@ -1470,6 +1493,13 @@ function LaporanTab({ projects }) {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            </label>
+          )}
+
+          {reportType === "donatur" && (
+            <label className="field">
+              <span>Nama Donatur (opsional)</span>
+              <input value={donorName} onChange={(e) => setDonorName(e.target.value)} placeholder="mis. Bapak Ahmad Yusuf" />
             </label>
           )}
 
@@ -1490,7 +1520,7 @@ function LaporanTab({ projects }) {
 
           <button
             className="btn-primary"
-            disabled={reportType === "program" && !selectedProjectId}
+            disabled={(reportType === "program" || reportType === "donatur") && !selectedProjectId}
             onClick={() => setShowPreview(true)}
           >
             Lihat & Buat Laporan
@@ -1577,6 +1607,73 @@ function ProgramMonthlyReport({ project, monthLabel, photo1, photo2 }) {
         {photo2 && <img src={photo2} className="report-photo" alt="Dokumentasi 2" />}
         {!photo1 && !photo2 && <p className="muted">Belum ada foto diunggah.</p>}
       </div>
+    </div>
+  );
+}
+
+function DonorProgressReport({ project, donorName, monthLabel, photo1, photo2 }) {
+  if (!project) return <div className="muted">Program belum dipilih.</div>;
+  const sd = project.stageData;
+  const greetingName = donorName ? `Bapak/Ibu ${donorName}` : "Bapak/Ibu Donatur";
+  const pmTarget = sd[0].targetPM || "-";
+  const pmReal = sd[2].realisasiPM;
+
+  return (
+    <div className="report-doc">
+      <div className="report-header">
+        <div className="report-org">Rumah Zakat — Sumatera Selatan</div>
+        <h1 className="report-title">Laporan Progress Program</h1>
+        <div className="report-subtitle">{project.name}</div>
+        <div className="report-period">Periode: {monthLabel}</div>
+      </div>
+
+      <p>Kepada {greetingName} yang dirahmati Allah,</p>
+      <p>
+        Assalamu'alaikum warahmatullahi wabarakatuh. Alhamdulillah, dengan izin Allah dan dukungan {greetingName},
+        program <strong>{project.name}</strong> di {project.location} terus berjalan. Berikut kami sampaikan
+        perkembangan terkininya sebagai bentuk pertanggungjawaban dan rasa syukur kami atas amanah yang diberikan.
+      </p>
+
+      <div className="report-section-title">Tentang Program Ini</div>
+      <p>{sd[0].dampakDiharapkan || sd[0].latarBelakang || "-"}</p>
+
+      <div className="report-section-title">Perkembangan Saat Ini</div>
+      <p>
+        Program ini saat ini memasuki tahap <strong>{STAGES[project.stage]}</strong>.
+        {sd[2].kendala ? " Dalam pelaksanaannya di lapangan, tim kami terus berupaya menghadapi tantangan dan mencari solusi terbaik agar manfaat dapat tersalurkan optimal." : ""}
+      </p>
+
+      <div className="report-section-title">Dampak bagi Penerima Manfaat</div>
+      <p>
+        Program ini menyasar <strong>{pmTarget}</strong> penerima manfaat.
+        {pmReal
+          ? ` Hingga saat ini, sebanyak ${pmReal} telah merasakan manfaatnya secara langsung, alhamdulillah.`
+          : " Realisasi penerima manfaat akan kami laporkan lebih lanjut seiring berjalannya program."}
+      </p>
+      {sd[3].dampakTercapai && <p>{sd[3].dampakTercapai}</p>}
+      {sd[3].testimoni && <p style={{ fontStyle: "italic" }}>"{sd[3].testimoni}"</p>}
+
+      <div className="report-section-title">Penyaluran Amanah {greetingName}</div>
+      <p>
+        Dana yang telah dipercayakan digunakan untuk mendukung pelaksanaan program ini di lapangan, termasuk
+        kebutuhan operasional dan pelaksanaan kegiatan sesuai rencana yang telah disusun bersama tim.
+      </p>
+
+      <div className="report-section-title">Dokumentasi Kegiatan</div>
+      <div className="report-photos">
+        {photo1 && <img src={photo1} className="report-photo" alt="Dokumentasi 1" />}
+        {photo2 && <img src={photo2} className="report-photo" alt="Dokumentasi 2" />}
+        {!photo1 && !photo2 && <p className="muted">Belum ada foto diunggah.</p>}
+      </div>
+
+      <div className="report-section-title">Doa & Ucapan Terima Kasih</div>
+      <p>
+        Kami dari Rumah Zakat Sumatera Selatan mengucapkan terima kasih yang sebesar-besarnya atas kepercayaan
+        {" "}{greetingName}. Semoga Allah SWT membalas dengan pahala yang berlipat ganda, menjadikan amanah ini
+        sebagai keberkahan, dan senantiasa melimpahkan rahmat-Nya. Aamiin.
+      </p>
+      <p>Wassalamu'alaikum warahmatullahi wabarakatuh.</p>
+      <p style={{ marginTop: 20 }}><strong>Rumah Zakat Cabang Palembang</strong></p>
     </div>
   );
 }
@@ -1715,6 +1812,8 @@ function Style() {
       .icon-btn:hover { border-color: #F2A65A; color: #7A2E0A; }
       .icon-btn-danger:hover { border-color: #C33A28; color: #C33A28; }
       .danger-zone { border-color: #F0C7BE; }
+      .doc-btn { display: inline-flex; align-items: center; gap: 4px; background: #F2A65A; color: #7A2E0A; font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 6px; text-decoration: none; font-family: 'Inter', sans-serif; white-space: nowrap; }
+      .doc-btn:hover { background: #E8631A; color: #fff; }
       .project-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px; color: #7A2E0A; }
       .kategori-tag { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #F2A65A; margin-top: 2px; }
       .project-meta { font-size: 12.5px; color: #7A6A60; }
@@ -1839,7 +1938,7 @@ function Style() {
         .card-actions { flex-wrap: wrap; }
       }
 
-      .report-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .report-type-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
       .report-type-card { text-align: left; background: #fff; border: 1px solid #E4DFD1; border-radius: 14px; padding: 18px; cursor: pointer; font-family: 'Inter', sans-serif; }
       .report-type-card:hover { border-color: #F2A65A; }
       .report-type-card.active { border-color: #E8631A; box-shadow: 0 0 0 2px rgba(232,99,26,0.25) inset; }
