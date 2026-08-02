@@ -1,13 +1,59 @@
 import { useState, useEffect, useRef } from "react";
-import { sheetsStorage } from "./lib/sheetsStorage";
+import { sheetsStorage as storage } from "./lib/sheetsStorage";
 
 const STAGES = ["Perencanaan", "Persiapan", "Eksekusi", "Laporan"];
 const VOL_STATUS = ["Aktif", "Tidak Aktif", "Baru"];
 const KATEGORI = ["Pendidikan", "Kesehatan", "Ekonomi", "Kemanusiaan & Bencana", "Dakwah", "Infrastruktur & Lingkungan"];
-const STORAGE_KEY = "rz-pm-data-v3";
+
 const MANAGER_CODE = "RZPalembang";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
+
+const BGT_TASK_TEMPLATE = {
+  Blooming: [
+    "Melakukan Social Needs Assessment",
+    "Memetakan stakeholder",
+    "Menentukan prioritas program",
+    "Menyusun Theory of Change",
+    "Menetapkan KPI program",
+    "Menyusun anggaran dan timeline",
+    "Menjalankan pilot project",
+  ],
+  Nectar: [
+    "Menentukan baseline",
+    "Menentukan indikator outcome",
+    "Mengumpulkan data",
+    "Mengukur perubahan",
+    "Menghitung Social Return on Investment (SROI) bila memungkinkan",
+    "Menyusun dashboard dampak",
+  ],
+  Fragrance: [
+    "Mengambil foto",
+    "Membuat video",
+    "Wawancara penerima manfaat",
+    "Membuat before-after",
+    "Menulis success story",
+    "Membuat campaign",
+  ],
+  Bees: [
+    "Segmentasi donor",
+    "Input & kelola data donor (CRM)",
+    "Follow up donor",
+    "Community gathering",
+    "Corporate visit",
+    "KOL engagement",
+    "Volunteer engagement",
+  ],
+  Pollination: [
+    "Referral program",
+    "Testimoni donor",
+    "Community advocacy",
+    "CSR partnership",
+    "Annual report",
+    "Recognition",
+    "Innovation",
+  ],
+};
 const numOf = (v) => parseInt(String(v || "0").replace(/[^0-9]/g, ""), 10) || 0;
 
 const emptyStageData = () => ({
@@ -128,42 +174,87 @@ const seedData = () => ({
   activityLog: [],
 });
 
+const OLD_STORAGE_KEY = "rz-pm-data-v3";
+
 function useStore() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState("loading");
   const [saveError, setSaveError] = useState(false);
-  const saveTimer = useRef(null);
+  const saveTimers = useRef({});
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await sheetsStorage.get(STORAGE_KEY);
-        setData(JSON.parse(res.value));
+        const [progItems, volItems, logRes] = await Promise.all([
+          storage.listWithValues("program:"),
+          storage.listWithValues("volunteer:"),
+          storage.get("activityLog").catch(() => ({ value: "[]" })),
+        ]);
+
+        if (progItems.length === 0 && volItems.length === 0) {
+          // Belum ada data per-record. Coba migrasi dari format lama (satu blob besar)
+          // sebelum menganggap ini instalasi baru, supaya data lama tidak hilang.
+          let migrated = null;
+          try {
+            const old = await storage.get(OLD_STORAGE_KEY);
+            const parsed = JSON.parse(old.value);
+            if (parsed && Array.isArray(parsed.projects)) migrated = parsed;
+          } catch {}
+
+          if (migrated) {
+            const volunteers = migrated.volunteers || [];
+            const activityLog = migrated.activityLog || [];
+            await Promise.all([
+              ...migrated.projects.map((p) => storage.set(`program:${p.id}`, JSON.stringify(p))),
+              ...volunteers.map((v) => storage.set(`volunteer:${v.id}`, JSON.stringify(v))),
+              storage.set("activityLog", JSON.stringify(activityLog)),
+            ]);
+            setData({ projects: migrated.projects, volunteers, activityLog });
+          } else {
+            const seed = seedData();
+            await Promise.all([
+              ...seed.projects.map((p) => storage.set(`program:${p.id}`, JSON.stringify(p))),
+              ...seed.volunteers.map((v) => storage.set(`volunteer:${v.id}`, JSON.stringify(v))),
+              storage.set("activityLog", JSON.stringify([])),
+            ]);
+            setData(seed);
+          }
+        } else {
+          setData({
+            projects: progItems.map((i) => JSON.parse(i.value)),
+            volunteers: volItems.map((i) => JSON.parse(i.value)),
+            activityLog: JSON.parse(logRes.value || "[]"),
+          });
+        }
       } catch {
-        const seed = seedData();
-        setData(seed);
-        try {
-          await sheetsStorage.set(STORAGE_KEY, JSON.stringify(seed));
-        } catch {}
+        setData(seedData());
       }
       setStatus("ready");
     })();
   }, []);
 
-  useEffect(() => {
-    if (status !== "ready" || !data) return;
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
+  const queueSave = (key, value) => {
+    clearTimeout(saveTimers.current[key]);
+    saveTimers.current[key] = setTimeout(async () => {
       try {
-        await sheetsStorage.set(STORAGE_KEY, JSON.stringify(data));
+        await storage.set(key, JSON.stringify(value));
         setSaveError(false);
       } catch {
         setSaveError(true);
       }
     }, 300);
-  }, [data, status]);
+  };
 
-  return [data, setData, status, saveError];
+  const removeSaved = async (key) => {
+    try {
+      await storage.delete(key);
+      setSaveError(false);
+    } catch {
+      setSaveError(true);
+    }
+  };
+
+  return [data, setData, status, saveError, queueSave, removeSaved];
 }
 
 const fmtDate = (d) => {
@@ -244,7 +335,7 @@ function ManagerCodeModal({ error, onClose, onSubmit }) {
 }
 
 function App() {
-  const [data, setData, status, saveError] = useStore();
+  const [data, setData, status, saveError, queueSave, removeSaved] = useStore();
   const [tab, setTab] = useState("dashboard");
   const [role, setRole] = useState("Staf");
   const [managerUnlocked, setManagerUnlocked] = useState(false);
@@ -289,93 +380,97 @@ function App() {
   }
 
   const updateProject = (id, patch) => {
-    setData((d) => ({
-      ...d,
-      projects: d.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-    }));
+    setData((d) => {
+      const projects = d.projects.map((p) => (p.id === id ? { ...p, ...patch } : p));
+      queueSave(`program:${id}`, projects.find((p) => p.id === id));
+      return { ...d, projects };
+    });
   };
 
   const updateStageField = (id, stageIdx, key, value) => {
-    setData((d) => ({
-      ...d,
-      projects: d.projects.map((p) =>
+    setData((d) => {
+      const projects = d.projects.map((p) =>
         p.id === id
           ? { ...p, stageData: { ...p.stageData, [stageIdx]: { ...p.stageData[stageIdx], [key]: value } } }
           : p
-      ),
-    }));
+      );
+      queueSave(`program:${id}`, projects.find((p) => p.id === id));
+      return { ...d, projects };
+    });
   };
 
   const pushLog = (log, entry) =>
-    [{ id: uid(), timestamp: new Date().toISOString(), ...entry }, ...(log || [])].slice(0, 200);
+    [{ id: uid(), timestamp: new Date().toISOString(), ...entry }, ...(log || [])].slice(0, 100);
 
   const addProject = (proj) => {
-    setData((d) => ({
-      ...d,
-      projects: [...d.projects, proj],
-      activityLog: pushLog(d.activityLog, { role, action: "Menambahkan", entityType: "Program", entityName: proj.name }),
-    }));
+    setData((d) => {
+      const activityLog = pushLog(d.activityLog, { role, action: "Menambahkan", entityType: "Program", entityName: proj.name });
+      queueSave(`program:${proj.id}`, proj);
+      queueSave("activityLog", activityLog);
+      return { ...d, projects: [...d.projects, proj], activityLog };
+    });
   };
 
   const editProjectInfo = (id, patch) => {
     setData((d) => {
       const target = d.projects.find((p) => p.id === id);
-      return {
-        ...d,
-        projects: d.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-        activityLog: pushLog(d.activityLog, {
-          role,
-          action: "Mengedit info",
-          entityType: "Program",
-          entityName: patch.name || target?.name || "",
-        }),
-      };
+      const updated = { ...target, ...patch };
+      const projects = d.projects.map((p) => (p.id === id ? updated : p));
+      const activityLog = pushLog(d.activityLog, {
+        role,
+        action: "Mengedit info",
+        entityType: "Program",
+        entityName: patch.name || target?.name || "",
+      });
+      queueSave(`program:${id}`, updated);
+      queueSave("activityLog", activityLog);
+      return { ...d, projects, activityLog };
     });
   };
 
   const deleteProject = (id) => {
     setData((d) => {
       const target = d.projects.find((p) => p.id === id);
-      return {
-        ...d,
-        projects: d.projects.filter((p) => p.id !== id),
-        activityLog: pushLog(d.activityLog, { role, action: "Menghapus", entityType: "Program", entityName: target?.name || "" }),
-      };
+      const activityLog = pushLog(d.activityLog, { role, action: "Menghapus", entityType: "Program", entityName: target?.name || "" });
+      removeSaved(`program:${id}`);
+      queueSave("activityLog", activityLog);
+      return { ...d, projects: d.projects.filter((p) => p.id !== id), activityLog };
     });
   };
 
   const addVolunteer = (vol) => {
-    setData((d) => ({
-      ...d,
-      volunteers: [...d.volunteers, vol],
-      activityLog: pushLog(d.activityLog, { role, action: "Menambahkan", entityType: "Relawan", entityName: vol.name }),
-    }));
+    setData((d) => {
+      const activityLog = pushLog(d.activityLog, { role, action: "Menambahkan", entityType: "Relawan", entityName: vol.name });
+      queueSave(`volunteer:${vol.id}`, vol);
+      queueSave("activityLog", activityLog);
+      return { ...d, volunteers: [...d.volunteers, vol], activityLog };
+    });
   };
 
   const editVolunteer = (id, patch) => {
     setData((d) => {
       const target = d.volunteers.find((v) => v.id === id);
-      return {
-        ...d,
-        volunteers: d.volunteers.map((v) => (v.id === id ? { ...v, ...patch } : v)),
-        activityLog: pushLog(d.activityLog, {
-          role,
-          action: "Mengedit",
-          entityType: "Relawan",
-          entityName: patch.name || target?.name || "",
-        }),
-      };
+      const updated = { ...target, ...patch };
+      const volunteers = d.volunteers.map((v) => (v.id === id ? updated : v));
+      const activityLog = pushLog(d.activityLog, {
+        role,
+        action: "Mengedit",
+        entityType: "Relawan",
+        entityName: patch.name || target?.name || "",
+      });
+      queueSave(`volunteer:${id}`, updated);
+      queueSave("activityLog", activityLog);
+      return { ...d, volunteers, activityLog };
     });
   };
 
   const deleteVolunteer = (id) => {
     setData((d) => {
       const target = d.volunteers.find((v) => v.id === id);
-      return {
-        ...d,
-        volunteers: d.volunteers.filter((v) => v.id !== id),
-        activityLog: pushLog(d.activityLog, { role, action: "Menghapus", entityType: "Relawan", entityName: target?.name || "" }),
-      };
+      const activityLog = pushLog(d.activityLog, { role, action: "Menghapus", entityType: "Relawan", entityName: target?.name || "" });
+      removeSaved(`volunteer:${id}`);
+      queueSave("activityLog", activityLog);
+      return { ...d, volunteers: d.volunteers.filter((v) => v.id !== id), activityLog };
     });
   };
 
@@ -421,7 +516,7 @@ function App() {
           ))}
         </nav>
         {saveError && (
-          <div className="sync-warning">Gagal menyimpan ke Google Sheets. Periksa koneksi.</div>
+          <div className="sync-warning">Gagal menyimpan sebagian data. Periksa koneksi.</div>
         )}
         <div className="role-switch">
           <div className="role-label">Peran</div>
@@ -1014,6 +1109,7 @@ function ProjectDetail({ project, volunteers, role, onBack, onUpdate, onStageFie
   const [approvalNote, setApprovalNote] = useState(project.approval.note || "");
   const [reportDraft, setReportDraft] = useState(null);
   const [editingTaskId, setEditingTaskId] = useState(null);
+  const [showBgtTemplate, setShowBgtTemplate] = useState(false);
 
   const addTask = () => {
     if (!newTask.trim()) return;
@@ -1039,6 +1135,10 @@ function ProjectDetail({ project, volunteers, role, onBack, onUpdate, onStageFie
 
   const deleteTask = (id) => {
     onUpdate({ tasks: project.tasks.filter((t) => t.id !== id) });
+  };
+
+  const addBgtTasks = (newTasks) => {
+    onUpdate({ tasks: [...project.tasks, ...newTasks] });
   };
 
   const nextStageBlocked = project.stage === 1 && project.approval.status !== "disetujui";
@@ -1123,7 +1223,10 @@ ${sd[3].catatanAkhir || "-"}`;
       <div className="detail-grid">
         <div className="detail-col">
           <div className="card">
-            <div className="card-title">Tugas</div>
+            <div className="card-title-row">
+              <div className="card-title">Tugas</div>
+              <button className="btn-ghost btn-small" onClick={() => setShowBgtTemplate(true)}>+ Template BGT</button>
+            </div>
             {project.tasks.map((t) => (
               <div key={t.id} className="task-row">
                 <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id)} />
@@ -1155,6 +1258,13 @@ ${sd[3].catatanAkhir || "-"}`;
               <input placeholder="Tambah tugas baru…" value={newTask} onChange={(e) => setNewTask(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTask()} />
               <button className="btn-ghost" onClick={addTask}>Tambah</button>
             </div>
+            {showBgtTemplate && (
+              <BgtTemplateModal
+                existingTitles={project.tasks.map((t) => t.title)}
+                onClose={() => setShowBgtTemplate(false)}
+                onAdd={addBgtTasks}
+              />
+            )}
           </div>
 
           <div className="card-title" style={{ margin: "20px 0 10px" }}>Breakdown per Tahap</div>
@@ -1726,6 +1836,49 @@ function RealizationReport({ projects, monthLabel, photo1, photo2 }) {
   );
 }
 
+function BgtTemplateModal({ existingTitles, onClose, onAdd }) {
+  const [selectedStages, setSelectedStages] = useState([]);
+
+  const toggleStage = (stage) => {
+    setSelectedStages((s) => (s.includes(stage) ? s.filter((x) => x !== stage) : [...s, stage]));
+  };
+
+  const handleAdd = () => {
+    const newTasks = [];
+    selectedStages.forEach((stage) => {
+      BGT_TASK_TEMPLATE[stage].forEach((step) => {
+        const title = `[${stage}] ${step}`;
+        if (!existingTitles.includes(title)) {
+          newTasks.push({ id: uid(), title, done: false, assignee: "" });
+        }
+      });
+    });
+    onAdd(newTasks);
+    onClose();
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Template Tugas Blooming Garden Theory</h2>
+        <div className="muted" style={{ marginBottom: 14 }}>
+          Pilih tahap BGT yang langkah teknisnya ingin ditambahkan sebagai tugas pada program ini. Tugas yang judulnya sama persis dengan yang sudah ada tidak akan digandakan.
+        </div>
+        {Object.keys(BGT_TASK_TEMPLATE).map((stage) => (
+          <label key={stage} className="bgt-stage-option">
+            <input type="checkbox" checked={selectedStages.includes(stage)} onChange={() => toggleStage(stage)} />
+            <span><strong>{stage}</strong> <span className="muted-inline">— {BGT_TASK_TEMPLATE[stage].length} langkah</span></span>
+          </label>
+        ))}
+        <div className="modal-actions">
+          <button className="btn-ghost" onClick={onClose}>Batal</button>
+          <button className="btn-primary" disabled={selectedStages.length === 0} onClick={handleAdd}>Tambahkan ke Daftar Tugas</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Style() {
   return (
     <style>{`
@@ -1853,6 +2006,10 @@ function Style() {
       .detail-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; margin-top: 20px; align-items: start; }
       .card { background: #fff; border: 1px solid #E4DFD1; border-radius: 14px; padding: 18px; margin-bottom: 16px; }
       .card-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; color: #7A2E0A; margin-bottom: 12px; }
+      .card-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+      .card-title-row .card-title { margin-bottom: 0; }
+      .btn-small { padding: 5px 10px; font-size: 12px; }
+      .bgt-stage-option { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #F0ECE0; font-size: 13.5px; cursor: pointer; }
 
       .task-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #F0ECE0; }
       .task-edit-input { flex: 1; padding: 5px 8px; border: 1px solid #F2A65A; border-radius: 6px; font-size: 13.5px; font-family: 'Inter', sans-serif; }

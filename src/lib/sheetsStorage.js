@@ -49,4 +49,12 @@ async function del(key) {
   return res.json();
 }
 
-export const sheetsStorage = { get, set, delete: del };
+async function listWithValues(prefix) {
+  assertConfigured();
+  const res = await fetch(`${BASE_URL}?prefix=${encodeURIComponent(prefix)}`);
+  if (!res.ok) throw new Error(`Gagal mengambil daftar data (status ${res.status})`);
+  const data = await res.json();
+  return data.items || [];
+}
+
+export const sheetsStorage = { get, set, delete: del, listWithValues };
